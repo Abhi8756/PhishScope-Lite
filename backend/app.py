@@ -30,9 +30,14 @@ try:
     logging.info(f"Loading model metadata from {META_PATH}")
     with open(META_PATH, 'r') as f:
         meta = json.load(f)
-    logging.info(f"Loaded model metadata: {meta}")
     
-    logging.info("\n--- Artifacts loaded successfully ---")
+    # This is the key for V2 Explainability!
+    LEXICAL_FEATURE_NAMES = meta.get('lexical_features', [])
+    if not LEXICAL_FEATURE_NAMES:
+        logging.warning("WARNING: 'lexical_features' not found in meta.json. Explainability will be limited.")
+    
+    logging.info(f"Loaded model metadata. Lexical features: {LEXICAL_FEATURE_NAMES}")
+    logging.info("\n--- Artifacts loaded successfully (V2 Model) ---")
 
 except FileNotFoundError as e:
     logging.error(f"CRITICAL ERROR: Model file not found. {e}")
@@ -40,136 +45,142 @@ except FileNotFoundError as e:
     clf = None
     tfidf = None
     meta = None
+    LEXICAL_FEATURE_NAMES = []
 except Exception as e:
     logging.error(f"An unexpected error occurred during model loading: {e}")
     clf = None
     tfidf = None
     meta = None
+    LEXICAL_FEATURE_NAMES = []
 
 
-# --- Feature Extraction Functions (Copied from training) ---
+# --- V2 Feature Extraction Functions ---
+# These MUST match the new training script
 
-# This is the helper that cleans text for TF-IDF
-# This regex is simple on purpose, to not remove link-like words from TF-IDF
+# 1. TF-IDF Text Cleaner
 url_re_simple = re.compile(r"http\S+|https\S+", flags=re.I)
-def clean_text(s):
-    s = str(s)
-    s = s.lower()
-    # We ONLY remove full http links from the text.
-    # We LEAVE 'gogle.com' and 'www.gogle.com' for the TF-IDF to see.
+def clean_text_for_tfidf(s):
+    s = str(s).lower()
     s = url_re_simple.sub(" ", s) 
-    s = re.sub(r"\d+", " ", s)  # remove digits
-    s = re.sub(r"[^a-z\s]", " ", s) # keep letters + space
-    s = re.sub(r"\s+", " ", s).strip() # normalize whitespace
+    s = re.sub(r"\d+", " ", s)
+    s = re.sub(r"[^a-z\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
     return s
 
-# These are the lexical features
-suspicious_list = [
-    "urgent", "reset password", "click here", "verify", "confirm",
-    "limited time", "action required", "security alert", "password", "bank", "transfer",
-    "account", "login", "invoice", "payment", "due"
-]
-susp_re = re.compile("|".join([re.escape(s) for s in suspicious_list]), flags=re.I)
+# 2. Lexical Feature Definitions
+# These regexes must be identical to the ones in the training script
+subject_susp_words = re.compile(r'urgent|action required|verify|account|security|alert|update|password|important|invoice|payment|due|suspicious', re.I)
+subject_caps_words = re.compile(r'\b[A-Z]{4,}\b')
+body_susp_words = re.compile(r'click here|verify your account|update your password|bank|credit card|ssn|social security|login|username|confidential|winner|congratulations|prize', re.I)
+url_finder = re.compile(r"(?:https?://|www\.|[a-zA-Z0-9-]+\.)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", re.I)
+sender_susp_re = re.compile(r'(\d+.*@|.*@(?:gmail|hotmail|yahoo|outlook|mail|service|support|info|account|security)\.)', re.I)
 
-# This is the GOOD, smart URL finder for the lexical features
-url_finder = re.compile(r"(?:https?://|www\.|[a-zA-Z0-9-]+\.)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", flags=re.I)
-
-def lexical_feats_from_raw_texts(raw_texts):
-    feats = []
-    for txt in raw_texts:
-        t = str(txt)
-        num_urls = len(url_finder.findall(t))
-        num_susp = len(susp_re.findall(t))
-        num_upper = sum(1 for w in t.split() if w.isupper() and len(w) > 1)
-        words = re.findall(r"\w+", t)
-        avg_len = float(np.mean([len(w) for w in words])) if words else 0.0
-        feats.append([num_urls, num_susp, num_upper, avg_len])
-    return np.array(feats, dtype=float)
-
-# This function combines all features
-def extract_features(raw_texts_list):
-    """
-    Extracts combined TF-IDF and Lexical features.
-    Returns:
-        - X_comb: Combined sparse matrix for the model
-        - cleaned_texts: List of cleaned text strings
-        - X_lex: The numpy array of lexical features
-    """
-    # 1. Clean text for TF-IDF
-    cleaned_texts = [clean_text(t) for t in raw_texts_list]
+def extract_lexical_features(sender, subject, body):
+    """ Extracts the 5 lexical features from raw text inputs. """
+    sender, subject, body = str(sender), str(subject), str(body)
     
-    # 2. Apply saved TF-IDF
-    X_tfidf = tfidf.transform(cleaned_texts)
+    features = [
+        1 if subject_susp_words.search(subject) else 0,  # f_subject_susp_words
+        1 if subject_caps_words.search(subject) else 0,  # f_subject_has_caps
+        1 if body_susp_words.search(body) else 0,        # f_body_susp_words
+        len(url_finder.findall(body)),                   # f_body_num_urls
+        1 if sender_susp_re.search(sender) else 0        # f_sender_is_susp
+    ]
+    return np.array(features, dtype=float).reshape(1, -1) # [1, 5] shape
+
+# 3. Explainability "Reason" Generator
+# This maps our feature names to human-readable reasons
+REASON_MAP = {
+    "f_subject_susp_words": "Subject line contains suspicious keywords (e.g., 'urgent', 'verify', 'password').",
+    "f_subject_has_caps": "Subject line uses excessive capitalization.",
+    "f_body_susp_words": "Email body contains suspicious phrases (e.g., 'click here', 'bank', 'login').",
+    "f_body_num_urls": "Email body contains one or more links.", # We can just say it has links
+    "f_sender_is_susp": "Sender's email address appears suspicious (e.g., from a generic provider or contains numbers)."
+}
+
+def get_prediction_reasons(lexical_features_array, prediction_label):
+    """ Generates a list of reasons for the prediction. """
+    reasons = []
+    # We only show reasons if it's Phishing
+    if prediction_label == "Phishing":
+        for i, feature_name in enumerate(LEXICAL_FEATURE_NAMES):
+            # Check if the feature was "on" (value > 0)
+            if lexical_features_array[0, i] > 0:
+                if feature_name in REASON_MAP:
+                    reasons.append(REASON_MAP[feature_name])
     
-    # 3. Get lexical features (from RAW text)
-    X_lex = lexical_feats_from_raw_texts(raw_texts_list)
-    
-    # 4. Combine
-    X_comb = hstack([X_tfidf, X_lex])
-    return X_comb, cleaned_texts, X_lex
+    if prediction_label == "Legitimate" and not reasons:
+        reasons.append("Email passes all heuristic checks. No common phishing indicators found.")
+        
+    return reasons
 
 
-# --- Prediction Endpoint ---
+# --- Prediction Endpoint (V4) ---
 @app.route("/predict", methods=["POST"])
 def predict_endpoint():
-    if clf is None or tfidf is None:
+    if clf is None:
         return jsonify({"error": "Model is not loaded. Check server logs."}), 500
 
     data = request.json
-    text = data.get("text", "")
     
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
+    # We now expect 3 fields from the frontend
+    sender = data.get("sender", "unknown@unknown.com")
+    subject = data.get("subject", "")
+    body = data.get("body", "")
+    
+    if not subject and not body:
+        return jsonify({"error": "No subject or body provided"}), 400
 
-    logging.info(f"Received text for analysis: {text[:70]}...")
+    logging.info(f"V2 Analysis: Sender: {sender}, Subject: {subject[:50]}...")
 
     try:
-        # 1. Extract features AND get the cleaned text back
-        features_comb, cleaned_texts, lex_features = extract_features([text])
+        # 1. Create 'master_text' for TF-IDF
+        master_text = f"{sender} {subject} {body}"
         
-        # *** THE REAL FIX (V3) ***
-        # Get num_urls from the lexical features (it's the first column)
-        num_urls = lex_features[0, 0] 
+        # 2. Clean and transform for TF-IDF
+        cleaned_master_text = clean_text_for_tfidf(master_text)
+        X_tfidf = tfidf.transform([cleaned_master_text])
         
-        # Get word count from the *cleaned* text
-        cleaned_input = cleaned_texts[0]
-        word_count = len(cleaned_input.split())
+        # 3. Extract Lexical Features
+        X_lex = extract_lexical_features(sender, subject, body)
         
-        # We only skip if the text is short AND it has NO URLs.
-        # This will now analyze "gogle.com" (word_count=2, num_urls=1)
-        # It will skip "link" (word_count=1, num_urls=0)
+        # 4. Check for "too short" inputs (our old V3 bug fix)
+        word_count = len(cleaned_master_text.split())
+        num_urls = X_lex[0, 3] # Get f_body_num_urls
+        
         if word_count < 3 and num_urls == 0:
             logging.warning(f"Input is too short ({word_count} words) and has no URLs. Skipping model.")
             return jsonify({
-                "prediction": "Legitimate", # Default to safe
-                "confidence": 0.0, # 0% phishing confidence
-                "message": "Input is too short to analyze."
+                "prediction": "Legitimate",
+                "confidence": 0.0,
+                "reasons": ["Input is too short to analyze."]
             })
+        
+        # 5. Combine features
+        X_comb = hstack([X_tfidf, X_lex])
 
-        # 2. Get prediction probabilities
-        # pred_proba will be like [0.98, 0.02] (prob_legitimate, prob_phishing)
-        pred_proba = clf.predict_proba(features_comb)[0]
-        
-        # 3. Get the prediction (0 or 1)
+        # 6. Get prediction
+        pred_proba = clf.predict_proba(X_comb)[0]
         prediction_index = int(pred_proba.argmax())
-        
-        # 4. Get the confidence for that prediction
-        confidence = float(pred_proba[prediction_index])
-        
-        # 5. Get the label
         result_label = "Phishing" if prediction_index == 1 else "Legitimate"
+        
+        # 7. Get Explainable Reasons!
+        reasons = get_prediction_reasons(X_lex, result_label)
 
         logging.info(f"Prediction: {result_label}, Confidence: {float(pred_proba[1]):.4f}")
+        for reason in reasons:
+            logging.info(f"  - Reason: {reason}")
 
-        # 6. Return the full result
-        # Note: The frontend wants the 'phishing' confidence, so we send pred_proba[1]
+        # 8. Return the full result + reasons
         return jsonify({
             "prediction": result_label,
-            "confidence": float(pred_proba[1]) # Always send the PHISHING confidence
+            "confidence": float(pred_proba[1]), # Always send the PHISHING confidence
+            "reasons": reasons # NEW: Send the list of reasons
         })
 
     except Exception as e:
         logging.error(f"Error during prediction: {e}")
+        logging.exception("Stack trace:") # More detailed logging
         return jsonify({"error": "An error occurred during analysis."}), 500
 
 # --- Health Check Endpoint ---
@@ -183,6 +194,4 @@ def health_check():
 
 # --- Run the App ---
 if __name__ == "__main__":
-    # Use 0.0.0.0 to make it accessible on your network
-    # Debug=True makes it auto-reload when you save the file
     app.run(host="0.0.0.0", port=5001, debug=True)
