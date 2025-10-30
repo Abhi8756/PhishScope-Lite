@@ -1,7 +1,0 @@
-body { font-family: Arial, sans-serif; background: #f7f8fb; padding: 20px; }
-.container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
-input, textarea { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; }
-button { padding: 10px 14px; border-radius: 6px; border: none; background: #2f855a; color: white; cursor: pointer; }
-.result { margin-top: 20px; padding: 12px; background: #f0fff4; border-radius: 6px; }
-.error { color: #b00020; margin-top: 10px; }
-pre { background: #fff; padding: 10px; border-radius: 4px; border: 1px solid #eee; }

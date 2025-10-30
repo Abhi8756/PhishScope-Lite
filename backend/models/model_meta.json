@@ -1,0 +1,6 @@
+{
+  "tfidf_max_features": 5000,
+  "lexical_features_count": 4,
+  "combined_feature_count": 5004,
+  "sklearn_version": "1.2.2"
+}
