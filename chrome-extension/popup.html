@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PhishScope Control</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      width: 250px;
+      padding: 10px;
+      background-color: #f4f4f4;
+    }
+    h3 {
+      text-align: center;
+      margin-top: 0;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      font-size: 14px;
+      border: none;
+      border-radius: 5px;
+      background-color: #3a5a9e;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #2a4a8e;
+    }
+    #status {
+      text-align: center;
+      margin-top: 10px;
+      font-size: 12px;
+      color: green;
+    }
+  </style>
+</head>
+<body>
+  <h3>PhishScope V1</h3>
+  <button id="trustSender">Trust Current Sender</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
