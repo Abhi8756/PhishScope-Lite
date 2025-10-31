@@ -1,12 +1,15 @@
 {
-  "model_type": "LogisticRegression",
-  "tfidf_max_features": 8000,
+  "model_type": "LogisticRegression_V5",
+  "tfidf_max_features": 10000,
   "lexical_features": [
-    "f_subject_susp_words",
-    "f_subject_has_caps",
-    "f_body_susp_words",
+    "f_sender_is_susp",
+    "f_subject_urgency",
+    "f_body_urgency",
+    "f_body_financial_scam",
+    "f_body_unethical",
+    "f_body_generic_cta",
     "f_body_num_urls",
-    "f_sender_is_susp"
+    "f_subject_has_url"
   ],
-  "combined_feature_count": 8005
+  "combined_feature_count": 10008
 }

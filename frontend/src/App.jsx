@@ -1,20 +1,17 @@
-import React, { useState } from 'react';
-import axios from 'axios'; // Used to call our backend
+import React, { useState, useMemo } from 'react';
+import axios from 'axios';
 
-// --- New V2 Icon Components ---
-// We add simple checkmark and alert icons for the reasons list
+// --- Icon Components (unchanged) ---
 const CheckIcon = () => (
   <svg className="w-5 h-5 text-green-400 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
   </svg>
 );
-
 const AlertIcon = () => (
   <svg className="w-5 h-5 text-red-400 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
   </svg>
 );
-
 const LoadingSpinner = () => (
   <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -22,36 +19,47 @@ const LoadingSpinner = () => (
   </svg>
 );
 
-// --- Main App Component ---
+// --- NEW: Simple Email Regex ---
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function App() {
-  // New state for 3 inputs
   const [sender, setSender] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null); // Will store { prediction, confidence, reasons }
+  const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+
+  // --- NEW: Email Validation State ---
+  const isSenderEmailValid = useMemo(() => {
+    // It's valid if it's empty OR it matches the regex
+    return sender.length === 0 || EMAIL_REGEX.test(sender);
+  }, [sender]);
 
   const API_URL = 'http://127.0.0.1:5001/predict';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!isSenderEmailValid) return; // Don't submit if email is invalid
+
     setLoading(true);
     setResult(null);
     setError(null);
 
     try {
-      // Send all 3 fields to the backend
       const response = await axios.post(API_URL, { 
         sender: sender,
         subject: subject,
         body: body 
       });
-      
       setResult(response.data);
     } catch (err) {
-      setError('Could not connect to the model. Is the backend server running?');
+      if (err.response && err.response.data && err.response.data.error) {
+          setError(err.response.data.error);
+      } else {
+          setError('Could not connect to the model. Is the backend server running?');
+      }
       console.error(err);
     } finally {
       setLoading(false);
@@ -64,23 +72,21 @@ export default function App() {
     return 'border-green-500 bg-green-900 bg-opacity-30';
   };
   
-  // Check if at least one field is filled
-  const isFormValid = sender || subject || body;
+  // Form is valid if: email is valid AND one of the fields is filled
+  const isFormValid = isSenderEmailValid && (sender || subject || body);
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4 font-sans">
       <div className="w-full max-w-2xl">
         <h1 className="text-4xl font-bold text-center mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300">
-          Phishing Detector V2
+          Phishing Detector V4
         </h1>
         <p className="text-center text-gray-400 mb-8">
           Enter the email details below to analyze it for phishing threats.
         </p>
 
-        {/* --- Form (now with 3 fields) --- */}
         <form onSubmit={handleSubmit}>
           <div className="space-y-4">
-            {/* Sender Input */}
             <div>
               <label htmlFor="sender" className="block text-sm font-medium text-gray-300 mb-1">Sender Email</label>
               <input
@@ -88,12 +94,17 @@ export default function App() {
                 id="sender"
                 value={sender}
                 onChange={(e) => setSender(e.target.value)}
-                className="w-full p-3 bg-gray-800 border-2 border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200"
-                placeholder="e.g., support@gogle.com"
+                // --- NEW: Dynamic border color for validation ---
+                className={`w-full p-3 bg-gray-800 border-2 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ${
+                  isSenderEmailValid ? 'border-gray-700' : 'border-red-500 ring-2 ring-red-500'
+                }`}
+                placeholder="e.g., support@google.com"
               />
+              {!isSenderEmailValid && (
+                <p className="text-red-400 text-sm mt-1">Please enter a valid email format.</p>
+              )}
             </div>
             
-            {/* Subject Input */}
             <div>
               <label htmlFor="subject" className="block text-sm font-medium text-gray-300 mb-1">Subject</label>
               <input
@@ -106,7 +117,6 @@ export default function App() {
               />
             </div>
 
-            {/* Body Input */}
             <div>
               <label htmlFor="body" className="block text-sm font-medium text-gray-300 mb-1">Email Body</label>
               <textarea
@@ -121,21 +131,19 @@ export default function App() {
 
           <button
             type="submit"
-            disabled={loading || !isFormValid} // Disable if loading or form is empty
+            disabled={loading || !isFormValid}
             className="w-full mt-6 p-4 bg-blue-600 font-bold rounded-lg text-white hover:bg-blue-500 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
           >
             {loading ? <LoadingSpinner /> : 'Analyze Email'}
           </button>
         </form>
 
-        {/* --- Error Message --- */}
         {error && (
           <div className="mt-6 p-4 border-2 border-yellow-500 bg-yellow-900 bg-opacity-30 rounded-lg text-center text-yellow-300">
             <strong>Error:</strong> {error}
           </div>
         )}
 
-        {/* --- Result Panel (now with REASONS) --- */}
         {result && (
           <div className={`mt-6 p-6 border-2 rounded-lg ${getResultClasses()} transition-all`}>
             <h2 className="text-2xl font-bold mb-4">Analysis Result:</h2>
@@ -152,7 +160,6 @@ export default function App() {
               </span>
             </div>
             
-            {/* --- NEW Reasons List --- */}
             {result.reasons && result.reasons.length > 0 && (
               <div className="mt-6">
                 <h3 className="text-lg font-semibold mb-3">Analysis Details:</h3>
@@ -166,7 +173,6 @@ export default function App() {
                 </ul>
               </div>
             )}
-            {/* --- End of Reasons List --- */}
             
           </div>
         )}
